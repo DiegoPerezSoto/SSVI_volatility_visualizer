@@ -28,9 +28,9 @@ pd.set_option("display.colheader_justify", "center")
 if __name__ == "__main__":
     bot = TradingBot(
         host="127.0.0.1",
-        port=7497,
+        port=4002,
         client_id=20,
-        symbol="NVDA",
+        symbol="META",
         risk_free_rate=0.043,
         div_yield=0.0,
     )

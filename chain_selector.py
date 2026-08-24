@@ -1,4 +1,4 @@
-"""Selects the near-the-money option contracts to track for the volatility radar."""
+"""Selects an optimal grid of OTM option contracts to maximize SVI surface resolution."""
 
 from __future__ import annotations
 
@@ -13,15 +13,18 @@ from subscription_manager import SubscriptionManager
 logger = logging.getLogger(__name__)
 
 _RADAR_OWNER = "radar"
-_STRIKES_UNIVERSE = 35       # candidate strikes before filtering
-_STRIKES_PER_EXPIRY = 8      # final strikes kept per expiry (one leg only, OTM)
-_EXPIRIES_TRACKED = 10       # number of expirations tracked
+
+# OPTIMIZED QUOTA ALLOCATION (8 expiries * 10 strikes = 80 lines, safe for 100 limit)
+_EXPIRIES_TRACKED = 12        # Consecutive maturities to build a dense term structure
+_OTM_PUTS_PER_EXPIRY = 15     # Contiguous OTM puts for the left wing and skew
+_OTM_CALLS_PER_EXPIRY = 15   # Contiguous OTM calls for the right wing
 
 
 class OptionChainSelector:
-    """Selects and manages subscriptions for near-the-money option contracts."""
+    """Selects and manages subscriptions to build a high-resolution volatility surface."""
 
     def __init__(self, symbol: str, ib: IB, subscription_manager: SubscriptionManager) -> None:
+        """Initializes the selector with IBKR client instances and tracking state."""
         self.symbol = symbol
         self._ib = ib
         self._subscriptions = subscription_manager
@@ -30,27 +33,57 @@ class OptionChainSelector:
         self.contracts_by_expiry: Dict[str, List[Option]] = {}
 
     def _select_target_expiries(self, chain_expirations: List[str]) -> List[str]:
-        """Picks the nearest `_EXPIRIES_TRACKED` expirations at or beyond next Friday + 6 days."""
+        """Picks the nearest `_EXPIRIES_TRACKED` expirations, preferring those >= next Friday + 6 days."""
+        if not chain_expirations:
+            return []
+        
+        # Try to get expirations starting from next Friday + 6 days
         target_date = datetime.now() + timedelta(days=6)
-        while target_date.weekday() != 4:  # 4 == Friday
+        while target_date.weekday() != 4:  # Friday
             target_date += timedelta(days=1)
         target = target_date.strftime("%Y%m%d")
-
-        valid_expiries = [exp for exp in sorted(chain_expirations) if exp >= target]
-        if valid_expiries:
+        
+        sorted_exps = sorted(chain_expirations)
+        
+        # Prefer expirations >= target
+        valid_expiries = [exp for exp in sorted_exps if exp >= target]
+        if valid_expiries and len(valid_expiries) >= _EXPIRIES_TRACKED:
             return valid_expiries[:_EXPIRIES_TRACKED]
-        return sorted(chain_expirations)[-_EXPIRIES_TRACKED:]
+        
+        # If not enough, take the closest _EXPIRIES_TRACKED expirations
+        if len(sorted_exps) >= _EXPIRIES_TRACKED:
+            return sorted_exps[-_EXPIRIES_TRACKED:]
+        
+        # If less than _EXPIRIES_TRACKED available, return all
+        logger.warning(f"Only {len(sorted_exps)} expirations available, wanted {_EXPIRIES_TRACKED}")
+        return sorted_exps
+
+
+    def _select_high_res_otm_strikes(self, available_strikes: List[float], spot: float) -> List[float]:
+        """Selects a dense, contiguous window of strikes centered around the spot.
+        
+        Guarantees enough points (10 per expiry) for the Gatheral SVI algorithm 
+        to perfectly anchor both the ATM curvature and the deep OTM asymptotes.
+        """
+        sorted_strikes = sorted(set(available_strikes))
+        
+        # OTM strictly defined
+        puts_strikes = [k for k in sorted_strikes if k < spot]
+        calls_strikes = [k for k in sorted_strikes if k >= spot]
+
+        # Extract the closest N puts (highest strikes below spot)
+        selected_puts = puts_strikes[-_OTM_PUTS_PER_EXPIRY:] if len(puts_strikes) >= _OTM_PUTS_PER_EXPIRY else puts_strikes
+        # Extract the closest N calls (lowest strikes above spot)
+        selected_calls = calls_strikes[:_OTM_CALLS_PER_EXPIRY] if len(calls_strikes) >= _OTM_CALLS_PER_EXPIRY else calls_strikes
+
+        return sorted(selected_puts + selected_calls)
 
     def refresh(self, underlying_ticker: Ticker, spot: float) -> None:
-        """Rebuilds the tracked contract set and (re)subscribes to their streams.
-
-        For each tracked expiry, selects the `_STRIKES_PER_EXPIRY` strikes
-        closest to spot using only the out-of-the-money leg (calls ≥ spot,
-        puts < spot) to avoid duplicating subscriptions.
+        """Rebuilds the tracked contract set and (re)subscribes to their live streams.
 
         Args:
             underlying_ticker: Live ticker for the underlying stock.
-            spot: Current underlying price.
+            spot: Current underlying asset price.
         """
         self._subscriptions.release_owner(_RADAR_OWNER)
 
@@ -64,23 +97,19 @@ class OptionChainSelector:
         self.expiries = self._select_target_expiries(chain.expirations)
         self.contracts_by_expiry = {}
 
-        nearest_strikes = sorted(chain.strikes, key=lambda s: abs(s - spot))[:_STRIKES_UNIVERSE]
-        ordered_strikes = sorted(nearest_strikes)
+        # Get our dense strike grid based on current spot
+        target_strikes = self._select_high_res_otm_strikes(chain.strikes, spot)
 
         for expiry in self.expiries:
-            # Build candidates for OTM only: calls ≥ spot, puts < spot
-            call_candidates = [Option(self.symbol, expiry, s, "C", "SMART") for s in ordered_strikes if s >= spot]
-            put_candidates = [Option(self.symbol, expiry, s, "P", "SMART") for s in ordered_strikes if s < spot]
+            call_candidates = [Option(self.symbol, expiry, s, "C", "SMART") for s in target_strikes if s >= spot]
+            put_candidates = [Option(self.symbol, expiry, s, "P", "SMART") for s in target_strikes if s < spot]
+            
             qualified = self._ib.qualifyContracts(*(call_candidates + put_candidates))
-
             if not qualified:
                 continue
 
-            # Select the top `_STRIKES_PER_EXPIRY` by distance to spot
-            by_distance = sorted(qualified, key=lambda c: abs(c.strike - spot))
-            selected_contracts = by_distance[:_STRIKES_PER_EXPIRY]
+            self.contracts_by_expiry[expiry] = sorted(qualified, key=lambda c: (c.strike, c.right))
 
-            self.contracts_by_expiry[expiry] = sorted(selected_contracts, key=lambda c: (c.strike, c.right))
-
+            # Register subscriptions dynamically
             for c in self.contracts_by_expiry[expiry]:
                 self._subscriptions.subscribe(c, _RADAR_OWNER)

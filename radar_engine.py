@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -74,7 +74,7 @@ class VolatilitySurfaceEngine:
         spot: float,
         expiries: List[str],
         contracts_by_expiry: Dict[str, List[Option]],
-    ) -> Dict[str, pd.DataFrame]:
+    ) -> Tuple[Dict[str, pd.DataFrame], List[Dict[str, Any]]]:
         """Computes the per-expiry radar DataFrame for the current cycle.
 
         Args:
@@ -83,11 +83,12 @@ class VolatilitySurfaceEngine:
             contracts_by_expiry: Subscribed option contracts per expiry.
 
         Returns:
-            Mapping of expiry -> DataFrame with columns for bid/ask/IV/SVI per strike.
+            Tuple of (Mapping of expiry -> DataFrame with columns for bid/ask/IV/SVI per strike, list of calibration slices).
         """
         radar_data: Dict[str, pd.DataFrame] = {}
+        surface_slices: List[Dict[str, Any]] = []
         if not expiries or not contracts_by_expiry:
-            return radar_data
+            return radar_data, surface_slices
 
         for expiry in expiries:
             contracts = contracts_by_expiry.get(expiry, [])
@@ -143,6 +144,15 @@ class VolatilitySurfaceEngine:
 
             _, svi_params = OptionsPricer.calibrate_svi(svi_strikes_sorted, svi_ivs_sorted, spot, t)
 
+            if svi_params is not None:
+                surface_slices.append({
+                    "expiry": expiry,
+                    "t": t,
+                    "strikes": np.array(svi_strikes_sorted, dtype=float),
+                    "market_ivs": np.array(svi_ivs_sorted, dtype=float),
+                    "svi_params": svi_params,
+                })
+
             rows = []
             for strike in sorted(quotes_by_strike.keys()):
                 quotes = quotes_by_strike[strike]
@@ -173,4 +183,4 @@ class VolatilitySurfaceEngine:
             if rows:
                 radar_data[expiry] = pd.DataFrame(rows)
 
-        return radar_data
+        return radar_data, surface_slices

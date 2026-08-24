@@ -1,6 +1,6 @@
 """Top-level orchestrator: owns IBKR connection and drives the main event loop.
 
-Wires together SubscriptionManager, PortfolioManager, VolatilityManager and TerminalUI.
+Wires together SubscriptionManager, PortfolioManager, VolatilityManager, TerminalUI, and RealtimeVolatilityVisualizer.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from portfolio_manager import PortfolioManager
 from subscription_manager import SubscriptionManager
 from terminal_ui import TerminalUI
 from volatility_manager import VolatilityManager
+from volatility_visualizer import RealtimeVolatilityVisualizer
 
 logger = logging.getLogger(__name__)
 
@@ -48,28 +49,41 @@ class TradingBot:
 
         self.ib = IB()
         self.ui = TerminalUI(symbol)
+        self.visualizer = RealtimeVolatilityVisualizer()
 
         self.subscriptions: Optional[SubscriptionManager] = None
         self.portfolio: Optional[PortfolioManager] = None
         self.volatility: Optional[VolatilityManager] = None
 
     def connect(self) -> None:
-        """Opens the IBKR connection and constructs the engine components."""
+        """Opens the IBKR connection, attaches event listeners, and constructs engine components."""
         logger.info("Connecting to IBKR at %s:%s (client_id=%s)...", self.host, self.port, self.client_id)
         try:
             self.ib.connect(self.host, self.port, self.client_id, timeout=15)
+            
+            # Intercept API limit rejections (Error 100: Max number of tickers reached)
+            def on_error(req_id: int, error_code: int, error_string: str, contract: object) -> None:
+                if error_code == 100:
+                    logger.warning(
+                        "DATA LIMIT REJECT: IBKR blocked subscription (Code 100). Reason: %s", 
+                        error_string
+                    )
+
+            self.ib.errorEvent += on_error
+
             self.subscriptions = SubscriptionManager(self.ib)
             self.portfolio = PortfolioManager(self.ib, self.subscriptions)
             self.volatility = VolatilityManager(
                 self.symbol, self.ib, self.subscriptions, self.risk_free_rate, self.div_yield
             )
-            logger.info("Connected.")
+            logger.info("Successfully connected to IBKR and initialized subsystems.")
         except Exception:
-            logger.exception("Failed to connect to IBKR.")
+            logger.exception("CRITICAL: Failed to establish connection to IBKR.")
             raise
 
     def initialize(self) -> None:
         """Subscribes to the underlying and fetches the day's opening price."""
+
         self.portfolio.refresh()
 
         stock = Stock(self.symbol, "SMART", "USD")
@@ -109,8 +123,14 @@ class TradingBot:
                     excess_liquidity=self.portfolio.excess_liquidity,
                     total_subscriptions=self.subscriptions.total_subscriptions,
                 )
+
+                self.visualizer.update(
+                    spot=current_price,
+                    slices=self.volatility.surface_slices,
+                )
         except KeyboardInterrupt:
             logger.info("Shutting down terminal safely...")
+            self.visualizer.close()
             self.ib.disconnect()
         except Exception:
             logger.exception("Unhandled error in main loop.")

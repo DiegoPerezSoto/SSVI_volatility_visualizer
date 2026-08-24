@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import Dict, List
+from typing import Any, Dict, List
 
 import numpy as np
 import pandas as pd
@@ -40,6 +40,7 @@ class VolatilityManager:
 
         self._last_chain_refresh: float = 0.0
         self.radar_data: Dict[str, pd.DataFrame] = {}
+        self.surface_slices: List[Dict[str, Any]] = []
 
     @property
     def expiries(self) -> List[str]:
@@ -67,6 +68,6 @@ class VolatilityManager:
             self._chain_selector.refresh(underlying_ticker, spot)
             self._last_chain_refresh = now
 
-        self.radar_data = self._engine.compute(
+        self.radar_data, self.surface_slices = self._engine.compute(
             spot, self._chain_selector.expiries, self._chain_selector.contracts_by_expiry
         )
