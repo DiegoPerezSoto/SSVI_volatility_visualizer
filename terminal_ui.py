@@ -81,5 +81,5 @@ class TerminalUI:
         for expiry, df in radar_data.items():
             print(f"\n [ OPTION RADAR | EXPIRY: {expiry} ]")
             print("═" * 130)
-            #print(df.to_string(index=False))
+            print(df.to_string(index=False))
             print("═" * 130)

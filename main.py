@@ -14,9 +14,17 @@ import pandas as pd
 
 from trading_bot import TradingBot
 
+# The terminal screen is cleared ~10x/second by TerminalUI, so anything sent
+# only to the console is wiped before you can read it. Route logs to a file
+# as well so `tail -f quantlab_debug.log` (or PowerShell equivalent) shows
+# live, non-disappearing output of what's happening.
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[
+        logging.FileHandler("quantlab_debug.log"),
+        logging.StreamHandler(),
+    ],
 )
 
 nest_asyncio.apply()
