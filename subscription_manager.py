@@ -3,7 +3,7 @@
 Multiple components (underlying tracker, volatility radar, portfolio valuator)
 may need live streams on the same contract. This module de-duplicates requests:
 each contract is subscribed to exactly once, only cancelled when every owner
-releases it. This keeps the bot well under IBKR's 100 simultaneous market-data
+releases it. This keeps the bot well under IBKR's simultaneous market-data
 line limit.
 """
 

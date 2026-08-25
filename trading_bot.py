@@ -5,6 +5,9 @@ Wires together SubscriptionManager, PortfolioManager, VolatilityManager, Termina
 
 from __future__ import annotations
 
+from datetime import datetime
+import os 
+
 import logging
 from typing import Optional
 
@@ -16,6 +19,8 @@ from subscription_manager import SubscriptionManager
 from terminal_ui import TerminalUI
 from volatility_manager import VolatilityManager
 from volatility_visualizer import RealtimeVolatilityVisualizer
+
+
 
 logger = logging.getLogger(__name__)
 
@@ -61,12 +66,29 @@ class TradingBot:
         try:
             self.ib.connect(self.host, self.port, self.client_id, timeout=15)
             
-            # Intercept API limit rejections (Error 100: Max number of tickers reached)
+            # Ensure a dedicated directory for API logs exists
+            log_dir = "logs"
+            os.makedirs(log_dir, exist_ok=True)
+            
+            # Generate a session-specific log file name
+            session_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+            log_file_path = os.path.join(log_dir, f"ibkr_api_rejections_{session_time}.log")
+
+            # Intercept API limit rejections and write them to a dedicated file
             def on_error(req_id: int, error_code: int, error_string: str, contract: object) -> None:
-                if error_code == 100:
+                # Filter for pacing violations or historical data limits (Codes 100, 162, 321)
+                if error_code in (100, 162, 321):
+                    timestamp = datetime.now().strftime("%H:%M:%S")
+                    error_msg = f"[{timestamp}] API Rejection (Code {error_code}): {error_string}\n"
+                    
+                    # Log to file to bypass terminal UI clearing
+                    with open(log_file_path, "a", encoding="utf-8") as file:
+                        file.write(error_msg)
+                        
+                    # Also emit a standard warning
                     logger.warning(
-                        "DATA LIMIT REJECT: IBKR blocked subscription (Code 100). Reason: %s", 
-                        error_string
+                        "DATA LIMIT REJECT: IBKR blocked subscription (Code %s). Logged to %s", 
+                        error_code, log_file_path
                     )
 
             self.ib.errorEvent += on_error
@@ -80,6 +102,7 @@ class TradingBot:
         except Exception:
             logger.exception("CRITICAL: Failed to establish connection to IBKR.")
             raise
+
 
     def initialize(self) -> None:
         """Subscribes to the underlying and fetches the day's opening price."""

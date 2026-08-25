@@ -1,4 +1,4 @@
-"""Black-Scholes pricing and SVI volatility surface calibration.
+"""Black-Scholes pricing and SSVI (Surface Stochastic Volatility Inspired) calibration.
 
 Stateless module: every function receives inputs explicitly and returns
 results without maintaining state. Safe for concurrent calls.
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class OptionsPricer:
-    """Stateless collection of Black-Scholes and SVI pricing routines."""
+    """Stateless collection of Black-Scholes and global SSVI pricing routines."""
 
     @staticmethod
     def compute_d1(spot: float, strike: float, t: float, r: float, sigma: float, div_yield: float) -> float:
@@ -64,22 +64,7 @@ class OptionsPricer:
         n_iter: int = 30,
         tol: float = 1e-5,
     ) -> float:
-        """Solves for implied volatility via bisection on Black-Scholes price.
-
-        Args:
-            market_price: Observed mid price of the option (bid/ask average).
-            spot: Current price of the underlying.
-            strike: Strike price.
-            t: Time to expiration, in years.
-            r: Risk-free rate.
-            div_yield: Continuous dividend yield.
-            right: 'C' for call, 'P' for put.
-            n_iter: Maximum number of bisection iterations.
-            tol: Convergence tolerance on the volatility bracket width.
-
-        Returns:
-            Implied volatility as a decimal (e.g. 0.25 for 25%).
-        """
+        """Solves for implied volatility via bisection on Black-Scholes price."""
         intrinsic = max(0.0, spot - strike) if right == "C" else max(0.0, strike - spot)
         if market_price <= intrinsic or np.isnan(market_price):
             return 0.001
@@ -110,55 +95,71 @@ class OptionsPricer:
         return max(days / 365, 1e-6)
 
     @staticmethod
-    def svi_total_variance(
-        k: NDArray[np.float64], a: float, b: float, rho: float, m: float, sigma: float
+    def power_law_phi(theta: NDArray[np.float64] | float, eta: float, gamma: float) -> NDArray[np.float64] | float:
+        """Computes the Power-Law scale function phi(theta) for SSVI."""
+        theta = np.maximum(theta, 1e-6)
+        return eta / ((theta ** gamma) * ((1.0 + theta) ** (1.0 - gamma)))
+
+    @staticmethod
+    def ssvi_total_variance(
+        k: NDArray[np.float64], theta: NDArray[np.float64] | float, rho: float, eta: float, gamma: float
     ) -> NDArray[np.float64]:
-        """Raw SVI parameterization: w(k) = a + b * (rho*(k - m) + sqrt((k - m)^2 + sigma^2))."""
-        return a + b * (rho * (k - m) + np.sqrt((k - m) ** 2 + sigma ** 2))
+        """Global SSVI parameterization: w(k, theta) = (theta/2) * (1 + rho*phi*k + sqrt((phi*k + rho)^2 + 1 - rho^2))."""
+        phi = OptionsPricer.power_law_phi(theta, eta, gamma)
+        sqrt_term = np.sqrt((phi * k + rho) ** 2 + 1.0 - rho ** 2)
+        return (theta / 2.0) * (1.0 + rho * phi * k + sqrt_term)
 
     @staticmethod
-    def _svi_objective(params: NDArray[np.float64], k_arr: NDArray[np.float64], w_observed: NDArray[np.float64]) -> float:
-        """Sum of squared errors between observed and SVI-model total variance."""
-        a, b, rho, m, sigma = params
-        w_model = OptionsPricer.svi_total_variance(k_arr, a, b, rho, m, sigma)
-        return float(np.sum((w_observed - w_model) ** 2))
+    def _ssvi_objective(
+        params: NDArray[np.float64], 
+        k_arr: NDArray[np.float64], 
+        theta_arr: NDArray[np.float64], 
+        w_obs: NDArray[np.float64]
+    ) -> float:
+        """Sum of squared errors between observed market variance and global SSVI surface."""
+        rho, eta, gamma = params
+        
+        # Absolute no-arbitrage boundary penalty
+        if eta * (1.0 + abs(rho)) > 2.0:
+            return 1e6
+            
+        w_model = OptionsPricer.ssvi_total_variance(k_arr, theta_arr, rho, eta, gamma)
+        return float(np.sum((w_obs - w_model) ** 2))
 
     @staticmethod
-    def calibrate_svi(
-        strikes: Sequence[float], ivs: Sequence[float], spot: float, t: float
-    ) -> Tuple[NDArray[np.float64], Optional[NDArray[np.float64]]]:
-        """Calibrates raw SVI surface (a, b, rho, m, sigma) to observed IVs.
-
-        Falls back to quadratic polynomial fit if L-BFGS-B does not converge,
-        so callers always get a usable fitted curve back.
+    def calibrate_global_ssvi(
+        k_arr: NDArray[np.float64], 
+        theta_arr: NDArray[np.float64], 
+        w_obs: NDArray[np.float64]
+    ) -> Optional[NDArray[np.float64]]:
+        """Calibrates the entire SSVI surface globally in a single L-BFGS-B pass.
 
         Args:
-            strikes: Strike prices used for calibration.
-            ivs: Observed implied volatilities (decimal) at each strike.
-            spot: Current underlying price.
-            t: Time to expiry, in years.
+            k_arr: 1D array of log-moneyness for all OTM options across all expiries.
+            theta_arr: 1D array of ATM total variances corresponding to each option's expiry.
+            w_obs: 1D array of observed market total variances.
 
         Returns:
-            Tuple of (fitted implied vols at the input strikes, SVI params array or None).
+            Optimal parameters [rho, eta, gamma] if successful and arbitrage-free, else None.
         """
-        strikes_arr = np.asarray(strikes, dtype=float)
-        ivs_arr = np.asarray(ivs, dtype=float)
-        k_arr = np.log(strikes_arr / spot)
-        w_observed = (ivs_arr ** 2) * t
+        if len(k_arr) < 5:
+            return None
 
-        x0 = [0.1 * t, 0.1, 0.0, 0.0, 0.1]
-        bounds = [(1e-5, None), (0.0, 5.0), (-0.99, 0.99), (-2.0, 2.0), (1e-5, 1.0)]
+        # Initial seed: zero correlation, neutral curvature, linear decay
+        x0 = [0.0, 1.0, 0.5]
+        # Bounds: rho in (-1, 1), eta > 0, gamma in (0, 1)
+        bounds = [(-0.99, 0.99), (1e-5, 5.0), (0.0, 1.0)]
 
         result = minimize(
-            OptionsPricer._svi_objective, x0, args=(k_arr, w_observed), method="L-BFGS-B", bounds=bounds
+            OptionsPricer._ssvi_objective, 
+            x0, 
+            args=(k_arr, theta_arr, w_obs), 
+            method="L-BFGS-B", 
+            bounds=bounds
         )
 
-        if result.success:
-            a_opt, b_opt, rho_opt, m_opt, sigma_opt = result.x
-            w_fit = OptionsPricer.svi_total_variance(k_arr, a_opt, b_opt, rho_opt, m_opt, sigma_opt)
-            iv_fit = np.sqrt(np.maximum(w_fit, 0) / t)
-            return iv_fit, result.x
+        if result.success and result.x[1] * (1.0 + abs(result.x[0])) <= 2.0:
+            return result.x
 
-        logger.warning("SVI calibration did not converge for spot=%.2f, t=%.4f; using quadratic fallback.", spot, t)
-        coeffs = np.polyfit(strikes_arr, ivs_arr, 2)
-        return np.polyval(coeffs, strikes_arr), None
+        logger.warning("Global SSVI calibration failed or hit arbitrage bounds.")
+        return None

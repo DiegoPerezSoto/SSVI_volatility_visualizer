@@ -64,7 +64,7 @@ class TerminalUI:
             f"AVAILABLE: ${available_funds:,.2f} | "
             f"EXCESS LIQ: ${excess_liquidity:,.2f}"
         )
-        print(f" ACTIVE SUBSCRIPTIONS: {total_subscriptions}/100")
+        print(f" ACTIVE SUBSCRIPTIONS: {total_subscriptions}")
         print("-" * 130)
 
         self._render_radar(radar_data)
@@ -81,5 +81,5 @@ class TerminalUI:
         for expiry, df in radar_data.items():
             print(f"\n [ OPTION RADAR | EXPIRY: {expiry} ]")
             print("═" * 130)
-            print(df.to_string(index=False))
+            #print(df.to_string(index=False))
             print("═" * 130)
