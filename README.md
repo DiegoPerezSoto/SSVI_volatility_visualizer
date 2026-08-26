@@ -1,4 +1,4 @@
-#SSVI Volatility Radar
+# SSVI Volatility Radar
 
 Real-time options volatility surface calibration and visualization via Interactive Brokers. Streams live option quotes, fits a global arbitrage-free SSVI+ρ(θ) surface, and displays market reality vs. model fit.
 
@@ -85,7 +85,9 @@ Run:
 python main.py
 tail -f quantlab_debug.log  # in another terminal
 ```
-**Note on Startup:** Upon initial launch, the terminal may briefly display contract resolution messages or warnings while IBKR qualifies the option chains and streams settle. Allow 10- 30 seconds for the dashboard to initialize cleanly.
+Note on Startup: Upon initial launch, the terminal may briefly display contract resolution messages or warnings while IBKR qualifies the option chains and streams settle. Allow 10- 30 seconds for the dashboard to initialize cleanly.
+
+
 ---
 
 ## Visualization
@@ -157,7 +159,6 @@ Both are checked during optimization; violations cause rejects.
 
 ## Terminal Output
 
-```
 ![Terminal UI Preview](Terminalview.png)
 
 **"SSVI IV"** is the model's prediction. If market IV >> SSVI IV, that strike is rich. If << SSVI IV, cheap.
