@@ -12,6 +12,7 @@ results without maintaining state. Safe for concurrent calls.
 
 from __future__ import annotations
 
+
 import logging
 from datetime import datetime
 from typing import Optional, Sequence, Tuple
@@ -20,6 +21,7 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.optimize import minimize
 from scipy.stats import norm
+
 
 logger = logging.getLogger(__name__)
 

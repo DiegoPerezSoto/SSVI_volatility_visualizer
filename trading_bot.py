@@ -25,7 +25,7 @@ from volatility_visualizer import RealtimeVolatilityVisualizer
 logger = logging.getLogger(__name__)
 
 _UNDERLYING_OWNER = "underlying"
-_LOOP_INTERVAL_SEC = 0.1
+_LOOP_INTERVAL_SEC = 0.00001
 _STARTUP_SETTLE_SEC = 2
 
 

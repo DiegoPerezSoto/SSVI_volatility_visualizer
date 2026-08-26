@@ -39,7 +39,7 @@ if __name__ == "__main__":
         port=4002,
         client_id=20,
         symbol="META",
-        risk_free_rate=0.043,
+        risk_free_rate=0.0375,
         div_yield=0.0,
     )
     bot.start()
