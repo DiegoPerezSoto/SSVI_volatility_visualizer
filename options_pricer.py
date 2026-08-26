@@ -2,7 +2,7 @@
 
 SSVI (Surface Stochastic Volatility Inspired) model augmented with an
 exponential decay function for rho: rho(theta) = rho_infty + (rho_0 - rho_infty)*exp(-lambda*theta).
-This allows the skew to change naturally across vencimientos: short-dated options
+This allows the skew to change naturally across expiries: short-dated options
 (small theta, affected by events) show stronger negative skew (low rho_0), while
 longer-dated options (large theta, normal regime) show milder skew (higher rho_infty).
 

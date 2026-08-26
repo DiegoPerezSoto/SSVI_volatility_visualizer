@@ -182,9 +182,7 @@ class RealtimeVolatilityVisualizer:
         self.ax_error.set_xlabel("Strike ($)", fontsize=9, color="#c9d1d9")
         self.ax_error.set_ylabel("Expiry (T in Years)", fontsize=9, color="#c9d1d9")
         self.ax_error.tick_params(colors="#c9d1d9")
-        #cbar = plt.colorbar(im, ax=self.ax_error, label="Error (%)")
-        #cbar.ax.tick_params(colors="#c9d1d9")
-        #cbar.set_label("Error (%)", color="#c9d1d9")
+
 
         self.fig.tight_layout()
         self.fig.canvas.draw_idle()

@@ -53,7 +53,7 @@ class TerminalUI:
         change_pct = (change / open_price * 100) if open_price > 0 else 0
 
         print("=" * 130)
-        print(f"    QUANT LAB | IBKR TERMINAL  |  CLOCK: {datetime.now().strftime('%H:%M:%S.%f')[:-4]}")
+        print(f"    Volatility Visualizer | IBKR TERMINAL  |  CLOCK: {datetime.now().strftime('%H:%M:%S.%f')[:-4]}")
         print("=" * 130)
         print(f" [ ASSET TRACKER: {self.symbol} ]")
         print(f" CURRENT: ${current_price:,.2f} ({change_pct:+.2f}%)   |   OPEN: ${open_price:,.2f} ({open_date})")

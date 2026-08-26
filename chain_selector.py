@@ -14,7 +14,6 @@ logger = logging.getLogger(__name__)
 
 _RADAR_OWNER = "radar"
 
-# OPTIMIZED QUOTA ALLOCATION (8 expiries * 10 strikes = 80 lines, safe for 100 limit)
 _EXPIRIES_TRACKED = 12   # Consecutive maturities to build a dense term structure
 _OTM_PUTS_PER_EXPIRY = 15  # Contiguous OTM puts for the left wing and skew
 _OTM_CALLS_PER_EXPIRY = 15  # Contiguous OTM calls for the right wing
