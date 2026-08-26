@@ -10,7 +10,7 @@ Real-time options volatility surface calibration and visualization via Interacti
 Quote stream → Spread filter → SSVI+ρ(θ) calibration → 4-panel diagnostic visualization
 ```
 
-Update cycle: ~100ms. All quotes, calibration, and visualization happen in-memory with no persistence.
+Update cycle: ~500ms - 2 s. All quotes, calibration, and visualization happen in-memory with no persistence.
 
 ---
 
@@ -22,7 +22,7 @@ main.py
         ├── subscription_manager.py       [deduplicates market-data streams]
         ├── portfolio_manager.py          [account balance tracking]
         ├── volatility_manager.py         [coordinates SSVI pipeline]
-        │   ├── chain_selector.py         [8–10 expirations × 6–8 OTM strikes]
+        │   ├── chain_selector.py         [8–14 expirations × 10–15 OTM strikes]
         │   ├── radar_engine.py           [SSVI calibration + IV computation]
         │   └── volatility_visualizer.py  [4-panel display]
         ├── terminal_ui.py                [console output]
@@ -33,7 +33,7 @@ main.py
 
 **Reference-Counted Subscriptions**
 
-Each contract is subscribed to once. When all owners release, the subscription cancels with IBKR. Keeps total < 100 simultaneous lines (IBKR limit).
+Each contract is subscribed to once. When all owners release, the subscription cancels with IBKR. .
 
 **OTM-Only Subscriptions**
 
@@ -73,8 +73,8 @@ bot = TradingBot(
     host="127.0.0.1",
     port=7497,
     client_id=20,
-    symbol="NVDA",
-    risk_free_rate=0.043,
+    symbol="META",
+    risk_free_rate=0.0375,
     div_yield=0.0,
 )
 bot.start()
@@ -90,14 +90,15 @@ tail -f quantlab_debug.log  # in another terminal
 
 ## Visualization
 
-Four synchronized panels, updated every ~100ms:
+Four synchronized panels, updated every ~1000ms:
 
 1. **2D Smiles:** Market quotes (dots) vs. SSVI fit (lines) per expiry
 2. **SSVI Surface:** Model prediction across (strike, expiry) grid
 3. **Market Surface:** Interpolated from observed quotes
 4. **Error Heatmap:** |IV_market - IV_ssvi| / IV_market (%)
 
-Blue/green in heatmap = fit < 2% error. Red zones = investigate (usually deep OTM or earnings-week).
+Green in heatmap = low error (good fit). Red zones = high discrepancy / investigate (usually deep OTM or earnings-week).
+
 
 ---
 
@@ -159,7 +160,7 @@ Both are checked during optimization; violations cause rejects.
 ```
 [ ASSET TRACKER: NVDA ]
  CURRENT: $565.21 (+2.34%)   |   OPEN: $552.18
- ACTIVE SUBSCRIPTIONS: 64/100
+ ACTIVE SUBSCRIPTIONS: 64
 
  [ OPTION RADAR | EXPIRY: 20260904 ]
 Strike | Call Bid | Call Ask | Call IV | SSVI IV | Put IV | Put Bid | OBI
