@@ -1,4 +1,4 @@
-# QuantLab SSVI Volatility Radar
+#SSVI Volatility Radar
 
 Real-time options volatility surface calibration and visualization via Interactive Brokers. Streams live option quotes, fits a global arbitrage-free SSVI+ρ(θ) surface, and displays market reality vs. model fit.
 
@@ -10,7 +10,7 @@ Real-time options volatility surface calibration and visualization via Interacti
 Quote stream → Spread filter → SSVI+ρ(θ) calibration → 4-panel diagnostic visualization
 ```
 
-Update cycle: ~100ms. All quotes, calibration, and visualization happen in-memory with no persistence.
+Update cycle: ~1000ms. All quotes, calibration, and visualization happen in-memory with no persistence.
 
 ---
 
@@ -22,7 +22,7 @@ main.py
         ├── subscription_manager.py       [deduplicates market-data streams]
         ├── portfolio_manager.py          [account balance tracking]
         ├── volatility_manager.py         [coordinates SSVI pipeline]
-        │   ├── chain_selector.py         [8–10 expirations × 6–8 OTM strikes]
+        │   ├── chain_selector.py         [10–14 expirations × 12–16 OTM strikes]
         │   ├── radar_engine.py           [SSVI calibration + IV computation]
         │   └── volatility_visualizer.py  [4-panel display]
         ├── terminal_ui.py                [console output]
@@ -33,7 +33,7 @@ main.py
 
 **Reference-Counted Subscriptions**
 
-Each contract is subscribed to once. When all owners release, the subscription cancels with IBKR. Keeps total < 100 simultaneous lines (IBKR limit).
+Each contract is subscribed to once. When all owners release, the subscription cancels with IBKR.
 
 **OTM-Only Subscriptions**
 
@@ -73,8 +73,8 @@ bot = TradingBot(
     host="127.0.0.1",
     port=7497,
     client_id=20,
-    symbol="NVDA",
-    risk_free_rate=0.043,
+    symbol="META",
+    risk_free_rate=0.0375,
     div_yield=0.0,
 )
 bot.start()
@@ -85,7 +85,7 @@ Run:
 python main.py
 tail -f quantlab_debug.log  # in another terminal
 ```
-
+**Note on Startup:** Upon initial launch, the terminal may briefly display contract resolution messages or warnings while IBKR qualifies the option chains and streams settle. Allow 10- 30 seconds for the dashboard to initialize cleanly.
 ---
 
 ## Visualization
@@ -97,7 +97,7 @@ Four synchronized panels, updated every ~100ms:
 3. **Market Surface:** Interpolated from observed quotes
 4. **Error Heatmap:** |IV_market - IV_ssvi| / IV_market (%)
 
-Blue/green in heatmap = fit < 2% error. Red zones = investigate (usually deep OTM or earnings-week).
+Green in heatmap = low error (good fit). Red zones = high discrepancy / investigate (usually deep OTM or earnings-week).
 
 ---
 ![Volatility Dashboard](VolatilityVisualizer.png)
@@ -158,16 +158,7 @@ Both are checked during optimization; violations cause rejects.
 ## Terminal Output
 
 ```
-[ ASSET TRACKER: NVDA ]
- CURRENT: $565.21 (+2.34%)   |   OPEN: $552.18
- ACTIVE SUBSCRIPTIONS: 64/100
-
- [ OPTION RADAR | EXPIRY: 20260904 ]
-Strike | Call Bid | Call Ask | Call IV | SSVI IV | Put IV | Put Bid | OBI
--------|----------|---------|---------|---------|--------|--------|-----
-560.0  | 10.20    | 10.45   | 32.1%   | 31.8%   | 31.2%  | 10.05  | +0.15
-565.0  | 6.85     | 7.05    | 29.4%   | 29.3%   | 29.8%  | 6.90   | -0.18
-```
+![Terminal UI Preview](Terminalview.png)
 
 **"SSVI IV"** is the model's prediction. If market IV >> SSVI IV, that strike is rich. If << SSVI IV, cheap.
 
@@ -192,11 +183,9 @@ Strike | Call Bid | Call Ask | Call IV | SSVI IV | Put IV | Put Bid | OBI
 ---
 
 ## References
-
-- Gatheral, J., & Jacquier, A. (2014). "Arbitrage-free SVI volatility surfaces." *Quantitative Finance*, 14(1).
 - Gatheral, J. (2006). *The Volatility Surface: A Practitioner's Guide.* Wiley.
-- Black, F., & Scholes, M. (1973). "The pricing of options and corporate liabilities." *Journal of Political Economy*, 81(3).
-
+- Hull, J. C. *Options, Futures, and Other Derivatives.* Pearson.
+- Wilmott, P. *Paul Wilmott Introduces Quantitative Finance.* Wiley.
 ---
 
 ## License
