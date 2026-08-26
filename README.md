@@ -1,273 +1,203 @@
-# Volatility Visualizer — Real-Time SSVI Volatility Surface Visualization
+# QuantLab SSVI Volatility Radar
 
-**A professional options terminal for visualizing implied volatility surfaces in real time, powered by Interactive Brokers API and the Surface Stochastic Volatility Inspired (SSVI) model.**
-
----
-
-## Table of Contents
-
-1. [Overview](#overview)
-2. [The Problem](#the-problem)
-3. [The Solution](#the-solution)
-4. [Architecture](#architecture)
-5. [Installation & Setup](#installation--setup)
-6. [Usage](#usage)
-7. [Visualization Examples](#visualization-examples)
-8. [Technical Details](#technical-details)
-9. [Performance & Scaling](#performance--scaling)
-10. [Limitations](#limitations)
-11. [Future Work](#future-work)
-12. [License](#license)
+Real-time options volatility surface calibration and visualization via Interactive Brokers. Streams live option quotes, fits a global arbitrage-free SSVI+ρ(θ) surface, and displays market reality vs. model fit.
 
 ---
 
 ## Overview
 
-**VolatilityVisualizer** is a real-time options analysis tool that connects directly to Interactive Brokers, streams live option quotes, calibrates a SSVI volatility surface, and visualizes both the raw market data and the fitted model in 3D.
-
-**Target audience:** Traders, quants, and developers interested in options microstructure and volatility modeling.
-
-**Why this matters:** Retail platforms show you an option's IV. They don't show you whether that IV is cheap or rich relative to its neighborhood on the volatility smile, tick by tick. This tool closes that gap.
-
----
-
-## The Problem
-
-When trading options, you're not just betting on direction—you're betting on *where* on the smile the market is pricing volatility. A standard broker platform shows:
-
 ```
-Strike  |  Bid  |  Ask  |  IV
---------|-------|-------|------
-205     | 2.50  | 2.65  | 28.3%
-210     | 0.85  | 0.95  | 25.1%
-215     | 0.15  | 0.25  | 20.7%
+Quote stream → Spread filter → SSVI+ρ(θ) calibration → 4-panel diagnostic visualization
 ```
 
-But it doesn't tell you: **Is 28.3% at the 205 call rich or cheap compared to the rest of the chain?**
-
-That's where most retail traders miss opportunities. They can't see the *structure* of the smile in real time, so they can't tell when a single point is an outlier or when the entire surface has shifted.
-
----
-
-## The Solution
-
-**Volatility Visualizer** extracts the underlying structure from noisy market data using the **SSVI (Surface Stochastic Volatility Inspired) model**, a five-parameter parameterization that's:
-
-- **Arbitrage-free** by construction (no butterfly spreads with negative value)
-- **Smooth and interpretable** (captures realistic smile dynamics)
-- **Fast to calibrate** (L-BFGS-B optimization, <100ms per expiry)
-- **Standard in institutional trading** (used by major quant desks, investment banks)
-
-The result: You see both the raw market quotes *and* the clean model fit, updated tick by tick. Outliers become obvious. Structural shifts become visible.
+Update cycle: ~100ms. All quotes, calibration, and visualization happen in-memory with no persistence.
 
 ---
 
 ## Architecture
 
 ```
-main.py (entry point)
-  └── trading_bot.py (IBKR connection + event loop)
-        ├── subscription_manager.py       [reference-counted market-data streams]
-        ├── portfolio_manager.py          [account balance + open positions]
-        ├── volatility_manager.py         [orchestrates all SVI components]
-        │   ├── chain_selector.py         [10 expirations × 8 strikes OTM]
+main.py
+  └── trading_bot.py
+        ├── subscription_manager.py       [deduplicates market-data streams]
+        ├── portfolio_manager.py          [account balance tracking]
+        ├── volatility_manager.py         [coordinates SSVI pipeline]
+        │   ├── chain_selector.py         [8–10 expirations × 6–8 OTM strikes]
         │   ├── radar_engine.py           [SSVI calibration + IV computation]
-        │   └── volatility_visualizer.py  [3D surface + 2D smile plots]
-        ├── terminal_ui.py                [console rendering]
-        └── options_pricer.py             [stateless Black-Scholes + SSVI math]
+        │   └── volatility_visualizer.py  [4-panel display]
+        ├── terminal_ui.py                [console output]
+        └── options_pricer.py             [stateless BS + SSVI math]
 ```
 
 ### Key Design Decisions
 
-**1. Reference-Counted Subscriptions**
+**Reference-Counted Subscriptions**
 
-Multiple components (underlying tracker, volatility radar, portfolio valuator) may need the same contract. SubscriptionManager de-duplicates requests, keeping the bot well under IBKR's limit.
+Each contract is subscribed to once. When all owners release, the subscription cancels with IBKR. Keeps total < 100 simultaneous lines (IBKR limit).
 
-**2. OTM-Only Subscriptions**
+**OTM-Only Subscriptions**
 
-For each strike, we subscribe to only one leg (calls ≥ spot, puts < spot). This avoids redundant subscriptions while ensuring we have the most liquid side of each strike.
+Per strike, subscribe to one leg only (calls ≥ spot, puts < spot). Avoids redundancy while maintaining deep liquidity for smile calibration.
 
-**3. Stateless Pricing**
+**Stateless Pricing**
 
-options_pricer.py contains no state. Every function receives inputs explicitly, making it unit-testable, thread-safe, and easy to extend.
+`options_pricer.py` has no state. Every function receives inputs, returns outputs. Safe for concurrent calls, easy to test.
+
+**Spread Filter**
+
+Quotes with spread > 15% excluded from calibration. Tunable in `radar_engine.py::_SPREAD_THRESHOLD_PCT`.
+
+**Monotonic Theta**
+
+Each expiry's ATM variance θ(t) anchored independently from 3 nearest-to-spot strikes. Post-processed to be monotonically increasing in t to prevent accidental calendar arbitrage in the input.
 
 ---
 
-## Installation & Setup
+## Installation
 
-### Requirements
+### Prerequisites
 
-- **Python 3.8+**
-- **TWS or IB Gateway** (running locally with API access enabled)
-  - Paper trading: default port `7497`
-  - Live: port `4002` (if using IB Gateway)
+- Python 3.8+
+- TWS or IB Gateway running locally (port 7497 for paper, 4002 for live)
+- Live market data subscriptions (US Equities + US Options)
 
-### Step 1: Clone and Install
+### Setup
 
 ```bash
-git clone https://github.com/yourusername/quant_lab.git
-cd quant_lab
 pip install -r requirements.txt
 ```
 
-### Step 2: Configure Interactive Brokers
-
-Ensure TWS or IB Gateway is running and API is enabled.
-
-### Step 3: Edit Configuration
-
-Open `main.py`:
-
+Edit `main.py`:
 ```python
 bot = TradingBot(
     host="127.0.0.1",
-    port=7497,              # 4002 if using IB Gateway
+    port=7497,
     client_id=20,
-    symbol="SPY",           # change to your underlying
+    symbol="NVDA",
     risk_free_rate=0.043,
     div_yield=0.0,
 )
+bot.start()
 ```
 
-### Step 4: Run
-
+Run:
 ```bash
 python main.py
+tail -f quantlab_debug.log  # in another terminal
 ```
 
 ---
 
-## Usage
+## Visualization
 
-### Terminal Interface
+Four synchronized panels, updated every ~100ms:
 
-The terminal updates every 500ms. You'll see:
+1. **2D Smiles:** Market quotes (dots) vs. SSVI fit (lines) per expiry
+2. **SSVI Surface:** Model prediction across (strike, expiry) grid
+3. **Market Surface:** Interpolated from observed quotes
+4. **Error Heatmap:** |IV_market - IV_ssvi| / IV_market (%)
 
-- Current underlying price and daily change
-- Account equity, available funds, excess liquidity
-- Live options radar: bid/ask/IV for each strike, plus the SVI-fitted IV
-
-### Interpretation
-
-**Call IV > SVI IV:** The call is rich relative to the model. Consider selling or trading spreads.
-
-**Call IV < SVI IV:** The call is cheap. Consider buying.
-
-Same applies to puts and overall smile curvature.
-
----
-
-## Visualization Examples
-
-### Example 1: Volatility Smiles by Expiration
-
-**[IMAGE PLACEHOLDER: Insert svi_lines_comparison.png or volatility_surface_comparison.png here]**
-
-*Left: Raw market data with noise. Right: SVI fitted model showing clean structure.*
-
-### Example 2: 3D Volatility Surface
-
-**[IMAGE PLACEHOLDER: Insert 3D surface plot here]**
-
-*The volatility surface across strikes and expirations. Colors represent IV levels.*
-
-### Example 3: Live Terminal Output
-
-**[IMAGE PLACEHOLDER: Insert screenshot of running terminal here]**
-
-*Updated every 500ms during market hours.*
+Blue/green in heatmap = fit < 2% error. Red zones = investigate (usually deep OTM or earnings-week).
 
 ---
 
 ## Technical Details
 
-### SVI Model
+### SSVI+ρ(θ) Formulation
 
-The raw SVI parameterization:
+```
+w(k, θ) = (θ / 2) · [1 + ρ(θ)·φ(θ)·k + √((φ(θ)·k + ρ(θ))² + 1 - ρ(θ)²)]
+```
 
-w(k) = a + b * ( rho*(k - m) + sqrt((k - m)^2 + sigma^2) )
+**Variables:**
+- k = ln(K/S): log-moneyness
+- θ = σ²_ATM × T: ATM total variance (per expiry)
+- w = IV² × T: total implied variance (output)
 
-Where:
-- k = ln(K/S) is log-moneyness
-- w = (IV)^2 * T is total implied variance
-- (a, b, rho, m, sigma) are five fitted parameters
+**Scale function:**
+```
+φ(θ) = η / (θ^γ · (1+θ)^(1-γ))
+```
+
+**Time-dependent correlation:**
+```
+ρ(θ) = ρ∞ + (ρ₀ - ρ∞) · exp(-λ · θ)
+```
+
+**Parameters to calibrate:** ρ₀, ρ∞, λ, η, γ (5 total, global across all expirations)
 
 ### Calibration
 
-For each expiry:
-1. Collect OTM quotes (calls ≥ spot, puts < spot)
-2. Solve for IV via bisection on Black-Scholes price
-3. Convert to total variance
-4. Fit SVI parameters via L-BFGS-B optimization
+1. Extract market data: valid quotes (spread < 15%), solve IV via bisection on BS price
+2. Anchor θ per expiry: average IV of 3 nearest-to-spot strikes
+3. Enforce θ(t) monotonically increasing
+4. Multi-start L-BFGS-B: minimize weighted sum of squared errors
 
-If optimization fails, we fall back to a quadratic polynomial fit.
+Objective:
+```
+L = Σᵢ (1 / θᵢ) · [w_obs[i] - w_model(kᵢ, θᵢ)]²
+```
 
-### Why SVI?
+Weight by 1/θ to prevent large-θ points from dominating optimization.
 
-- Only 5 parameters (vs 10+ for SABR)
-- Arbitrage-free by design
-- Calibrates in <100ms
-- Standard in institutional trading
+### No-Arbitrage
+
+**Butterfly constraint (within slice):**
+```
+η · (1 + |ρ(θ)|) ≤ 2.0
+```
+
+**Calendar constraint:**
+θ(t) monotonically increasing (enforced in data processing).
+
+Both are checked during optimization; violations cause rejects.
 
 ---
 
-## Performance & Scaling
+## Terminal Output
 
-| Metric | Value |
-|--------|-------|
-| Market-data subscriptions | 80 (10 expirations × 8 strikes) |
-| IBKR API limit | Comfortably under 100 lines |
-| SVI calibration per expiry | 30–80ms |
-| Full radar cycle | ~500ms |
-| Memory footprint | 50–100 MB |
-| CPU usage | <5% on modern hardware |
+```
+[ ASSET TRACKER: NVDA ]
+ CURRENT: $565.21 (+2.34%)   |   OPEN: $552.18
+ ACTIVE SUBSCRIPTIONS: 64/100
+
+ [ OPTION RADAR | EXPIRY: 20260904 ]
+Strike | Call Bid | Call Ask | Call IV | SSVI IV | Put IV | Put Bid | OBI
+-------|----------|---------|---------|---------|--------|--------|-----
+560.0  | 10.20    | 10.45   | 32.1%   | 31.8%   | 31.2%  | 10.05  | +0.15
+565.0  | 6.85     | 7.05    | 29.4%   | 29.3%   | 29.8%  | 6.90   | -0.18
+```
+
+**"SSVI IV"** is the model's prediction. If market IV >> SSVI IV, that strike is rich. If << SSVI IV, cheap.
 
 ---
 
 ## Limitations
 
-- **Visualization only:** No trade execution
-- **Real-time only:** No historical data saved (unless you add logging)
-- **Bid-ask data only:** Works with quotes, not tick-level trades
-- **Paper trading:** Some accounts may not have all expirations
-- **Market hours only:** Live data 9:30 AM–4:00 PM ET
+1. **Flat risk-free rate:** No yield curve interpolation. Error ~1–2 bps for short-dated options.
+2. **Continuous dividend yield:** Manually configured. Update quarterly or integrate corporate events API.
+3. **Black-Scholes for American options:** Approximation, acceptable for IV trading. Underprices puts (1–5% ATM).
+4. **Bid-ask data only:** No tick-level order flow; mid-price used for IV inversion.
+5. **Market hours only:** Real-time data 9:30 AM–4:00 PM ET.
 
 ---
 
 ## Future Work
 
-- Historical data logging for backtesting
-- Multi-underlying support (SPY + QQQ + IWM)
-- Real-time alerts (email/Slack on IV dislocations)
-- Web dashboard (Plotly in browser)
-- Machine learning for IV move prediction
-- Backtesting module
+- **Dynamic r(T):** Interpolate risk-free curve from US Treasuries instead of flat rate
+- **Automated dividend fetching:** Query IBKR corporate events API for upcoming yields
+- **Historical logging:** Persist (strike, IV, SSVI_IV, timestamp) to SQLite for backtesting
+
+---
+
+## References
+
+- Gatheral, J., & Jacquier, A. (2014). "Arbitrage-free SVI volatility surfaces." *Quantitative Finance*, 14(1).
+- Gatheral, J. (2006). *The Volatility Surface: A Practitioner's Guide.* Wiley.
+- Black, F., & Scholes, M. (1973). "The pricing of options and corporate liabilities." *Journal of Political Economy*, 81(3).
 
 ---
 
 ## License
 
-MIT License.
-
----
-
-## About
-
-Built as a demonstration of options microstructure, SVI calibration, IBKR API integration, and professional Python architecture.
-
-**Author:** Diego Pérez Soto
-**Background:** Math + Computer Science student 
-**Focus:** Quantitative finance, derivatives
-
----
-
-## Resources
-
-- **GitHub:** github.com/DiegoPerezSoto/SSVI_volatility_visualizer
-- **SVI Reference:** Gatheral, J. "The Volatility Surface: A Practitioner's Guide." Wiley, 2006.
-
----
-
-## Disclaimer
-
-This tool is for educational purposes only. Not investment advice. Options trading carries substantial risk; trade only with capital you can afford to lose.
+MIT. No warranty. Use at your own risk.
