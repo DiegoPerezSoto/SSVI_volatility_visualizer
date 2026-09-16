@@ -119,18 +119,27 @@ class RealtimeVolatilityVisualizer:
             w_ssvi = OptionsPricer.ssvi_total_variance(log_m, curr_theta, rho_0, rho_infty, lam, eta, gamma)
             IV_ssvi_mesh[i, :] = np.sqrt(np.maximum(w_ssvi, 0.0) / curr_t) * 100.0
             
-            # Market surface (interpolated from observed points)
+            # Market surface (interpolated from observed points - NORMALIZED)
             if len(market_points) > 0:
-                points_2d = market_points[:, :2]
+                
+                market_k = np.log(market_points[:, 0] / spot)
+                market_t = market_points[:, 1]
+                points_2d_norm = np.column_stack((market_k, market_t))
                 values = market_points[:, 2]
+                
+                
+                mesh_k = np.log(K_mesh[i, :] / spot)
+                mesh_t = T_mesh[i, :]
+                
+                
                 IV_market_interp = griddata(
-                    points_2d, values,
-                    (K_mesh[i, :], T_mesh[i, :]),
+                    points_2d_norm, values,
+                    (mesh_k, mesh_t),
                     method="linear",
                     fill_value=np.nan
                 )
                 IV_market_mesh[i, :] = IV_market_interp
-            
+
             # Error (only where both surfaces have data)
             valid_mask = ~(np.isnan(IV_market_mesh[i, :]) | np.isnan(IV_ssvi_mesh[i, :]))
             Error_mesh[i, valid_mask] = np.abs(IV_market_mesh[i, valid_mask] - IV_ssvi_mesh[i, valid_mask]) / np.maximum(IV_market_mesh[i, valid_mask], 0.1)

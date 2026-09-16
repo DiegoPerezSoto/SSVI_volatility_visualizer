@@ -157,14 +157,9 @@ class OptionsPricer:
         theta_arr: NDArray[np.float64], 
         w_obs: NDArray[np.float64]
     ) -> float:
-        """Sum of squared, theta-weighted errors for SSVI+rho(theta) surface.
-
-        Params: [rho_0, rho_infty, lambda, eta, gamma].
-        """
+        """Sum of squared, theta-weighted errors for SSVI+rho(theta) surface."""
         rho_0, rho_infty, lam, eta, gamma = params
         
-        # No-arbitrage boundary on (rho, eta) pairs: eta * (1 + |rho|) <= 2
-        # For rho(theta), check bounds over the observed theta range.
         rho_range = OptionsPricer.rho_theta(np.array([theta_arr.min(), theta_arr.max()]), rho_0, rho_infty, lam)
         max_rho_bound = eta * (1.0 + np.max(np.abs(rho_range)))
         if max_rho_bound > 2.0:
@@ -172,8 +167,14 @@ class OptionsPricer:
             
         w_model = OptionsPricer.ssvi_total_variance(k_arr, theta_arr, rho_0, rho_infty, lam, eta, gamma)
         weights = 1.0 / np.maximum(theta_arr, 1e-6)
-        return float(np.sum(weights * (w_obs - w_model) ** 2))
+        
+        
+        mse = float(np.sum(weights * (w_obs - w_model) ** 2))
+        regularization = 0.05 * (rho_infty - rho_0)**2  
+        
+        return mse + regularization
 
+    
     @staticmethod
     def calibrate_global_ssvi(
         k_arr: NDArray[np.float64], 
