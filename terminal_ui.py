@@ -67,7 +67,7 @@ class TerminalUI:
         print(f" ACTIVE SUBSCRIPTIONS: {total_subscriptions}")
         print("-" * 130)
 
-        self._render_radar(radar_data)
+        #self._render_radar(radar_data)
 
         print("=" * 130)
         print(" [ SYSTEM LOG ] -> STREAMING MODE ACTIVE")

@@ -6,6 +6,8 @@ Wires together SubscriptionManager, PortfolioManager, VolatilityManager, Termina
 from __future__ import annotations
 
 from datetime import datetime
+import time
+
 import os 
 
 import logging
@@ -20,7 +22,8 @@ from terminal_ui import TerminalUI
 from volatility_manager import VolatilityManager
 from volatility_visualizer import RealtimeVolatilityVisualizer
 
-
+import queue 
+import multiprocessing
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +57,7 @@ class TradingBot:
 
         self.ib = IB()
         self.ui = TerminalUI(symbol)
-        self.visualizer = RealtimeVolatilityVisualizer()
+        self.visualizer_queue : Optional[multiprocessing.Queue] = None 
 
         self.subscriptions: Optional[SubscriptionManager] = None
         self.portfolio: Optional[PortfolioManager] = None
@@ -125,15 +128,22 @@ class TradingBot:
 
     def run(self) -> None:
         """Runs the main polling loop: refresh portfolio, refresh radar, redraw terminal."""
+
+        last_visualizer_update: float = 0.0
+        _VISUALIZER_REFRESH_SEC = 1
+
         try:
             while True:
+
                 self.ib.sleep(_LOOP_INTERVAL_SEC)
-                self.portfolio.refresh()
-                self.volatility.build_radar(self.underlying)
+                current_time = time.time()
 
                 last = self.underlying.last
                 close = self.underlying.close
                 current_price = float(last if last and not np.isnan(last) else close)
+
+                self.portfolio.refresh()
+                self.volatility.build_radar(self.underlying)
 
                 self.ui.render(
                     current_price=current_price,
@@ -147,10 +157,12 @@ class TradingBot:
                     total_subscriptions=self.subscriptions.total_subscriptions,
                 )
 
-                self.visualizer.update(
-                    spot=current_price,
-                    slices=self.volatility.surface_slices,
-                )
+                if current_time - last_visualizer_update >= _VISUALIZER_REFRESH_SEC:
+                    if self.visualizer_queue is not None:
+                        payload = {"spot": current_price, "slices": self.volatility.surface_slices}
+                        self.visualizer_queue.put(payload)
+                    last_visualizer_update = current_time
+
         except KeyboardInterrupt:
             logger.info("Shutting down terminal safely...")
             self.visualizer.close()

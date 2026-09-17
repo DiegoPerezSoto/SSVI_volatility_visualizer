@@ -13,6 +13,9 @@ from scipy.interpolate import griddata
 
 from options_pricer import OptionsPricer
 
+import queue
+import multiprocessing
+
 
 class RealtimeVolatilityVisualizer:
     """Renders high-grade financial diagnostics: 2D smiles, dual 3D surfaces, calibration error."""
@@ -200,3 +203,26 @@ class RealtimeVolatilityVisualizer:
     def close(self) -> None:
         """Closes visualizer window safely."""
         plt.close(self.fig)
+
+
+def run_visualizer_process(data_queue: multiprocessing.Queue) -> None:
+    """ Multiprocessing queue-listener architecture"""
+    visualizer = RealtimeVolatilityVisualizer()
+
+    while True:
+        try:
+            data = data_queue.get(timeout = 0.1)
+
+            if data == "SHUTDOWN":
+                visualizer.close()
+                break
+
+            spot = data["spot"]
+            slices = data["slices"]
+            visualizer.update(spot, slices)
+
+        except queue.Empty:
+            visualizer.fig.canvas.flush_events
+
+        
+
